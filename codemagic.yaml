@@ -1,0 +1,21 @@
+workflows:
+  android-workflow:
+    name: Android Release Workflow
+    max_build_duration: 30
+    environment:
+      flutter: default
+    scripts:
+      - name: Get Flutter packages
+        script: |
+          cd gesture_detector
+          flutter packages pub get
+      - name: Build APK with Flutter
+        script: |
+          cd gesture_detector
+          flutter build apk --release
+    artifacts:
+      - gesture_detector/build/app/outputs/flutter-apk/app-release.apk
+    publishing:
+      email:
+        recipients:
+          - user@example.com
