@@ -68,7 +68,10 @@ flutter:
 
   # To add assets to your application, add an assets section, like this:
   assets:
-    - assets/gesture_model.tflite
+    - assets/gesture_classifier.tflite
+    - assets/gesture_labels.json
+    - assets/landmark_model.tflite
+    - assets/scaler_params.json
 
 
   # An image asset can refer to one or more resolution-specific "variants", see

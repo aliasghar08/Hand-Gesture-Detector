@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:hand_gesture_app/main.dart';
 import 'package:hand_gesture_app/screens/CameraScreen.dart';
 
 class HomePage extends StatelessWidget {

@@ -1,170 +1,123 @@
-import 'dart:io';
-import 'package:camera/camera.dart';
+import 'dart:convert';
+import 'dart:math' as math;
 import 'package:flutter/services.dart';
-import 'package:image/image.dart' as img;
 import 'package:tflite_flutter/tflite_flutter.dart';
 
+/// Handles only Stage 2: 21 MediaPipe landmarks → gesture label.
+/// Stage 1 (hand detection + landmark extraction) is done by the
+/// hand_landmarker plugin in CameraScreen.
 class GestureRecognitionService {
-  Interpreter? _interpreter;
-  List<String>? _labels;
+  Interpreter? _classifierInterp;
+  List<String> _labels = [];
+  List<double> _scalerMean = [];
+  List<double> _scalerScale = [];
 
-  // Assume the model from the Jupyter notebook (MobileNetV2 based) expects 224x224 RGB
-  static const int inputSize = 224;
-
-  // Placeholder labels based on our plan
-  static const List<String> defaultLabels = [
-    "Palm",
-    "L Shape",
-    "Fist",
-    "Fist Moved",
-    "Thumb",
-    "Index",
-    "OK",
-    "Palm Moved",
-    "C Shape",
-    "Down"
-  ];
+  bool get isReady => _classifierInterp != null && _labels.isNotEmpty;
 
   Future<void> initialize() async {
-    try {
-      // Load the model
-      _interpreter = await Interpreter.fromAsset('assets/gesture_model.tflite');
-      _labels = defaultLabels; // Or load from a file if needed
-      print("Model loaded successfully.");
-    } catch (e) {
-      print("Error loading model: $e");
-    }
+    // Load MLP gesture classifier (tiny model, fast on main thread)
+    _classifierInterp = await Interpreter.fromAsset('assets/gesture_classifier.tflite');
+
+    final labelsJson = await rootBundle.loadString('assets/gesture_labels.json');
+    _labels = List<String>.from(jsonDecode(labelsJson));
+
+    final scalerJson = await rootBundle.loadString('assets/scaler_params.json');
+    final scalerData = jsonDecode(scalerJson);
+    _scalerMean  = List<double>.from(scalerData['mean']);
+    _scalerScale = List<double>.from(scalerData['scale']);
+
+    print('Gesture classifier ready. Labels: $_labels');
   }
 
   void dispose() {
-    _interpreter?.close();
+    _classifierInterp?.close();
   }
 
-  String recognizeGesture(CameraImage cameraImage) {
-    if (_interpreter == null) {
-      return "Model not loaded";
+  /// Classify a gesture from 21 landmarks.
+  /// [landmarks] must be a flat list of 42 doubles: [x0,y0, x1,y1, ..., x20,y20]
+  /// Returns {gesture: String, confidence: double}.
+  Map<String, dynamic> classify(List<double> landmarks) {
+    if (!isReady || landmarks.length != 42) {
+      return {'gesture': '', 'confidence': 0.0};
     }
 
     try {
-      // 1. Convert CameraImage to image.Image
-      img.Image? image = _convertCameraImage(cameraImage);
-      if (image == null) return "Failed to process image";
-
-      // 2. Resize to required input size (224x224)
-      img.Image resizedImage = img.copyResize(image, width: inputSize, height: inputSize);
-
-      // 3. Preprocess and convert to Tensor input (1, 224, 224, 3)
-      var inputTensor = _imageToByteListFloat32(resizedImage, inputSize, 127.5, 127.5);
-
-      // 4. Run inference
-      var outputBuffer = List.filled(1 * defaultLabels.length, 0.0).reshape([1, defaultLabels.length]);
-      _interpreter!.run(inputTensor, outputBuffer);
-
-      // 5. Parse output
-      List<double> probabilities = (outputBuffer[0] as List).cast<double>();
+      // Step 1: Convert to wrist-relative coordinates
+      final double wristX = landmarks[0];
+      final double wristY = landmarks[1];
       
-      int highestProbIndex = 0;
-      double maxProb = probabilities[0];
-      for (int i = 1; i < probabilities.length; i++) {
-        if (probabilities[i] > maxProb) {
-          maxProb = probabilities[i];
-          highestProbIndex = i;
+      List<double> relativeCoords = [];
+      
+      for (int i = 0; i < landmarks.length; i += 2) {
+        relativeCoords.add(landmarks[i] - wristX);
+        relativeCoords.add(landmarks[i + 1] - wristY);
+      }
+      
+      // Step 2: Rotation invariance
+      // Middle Finger MCP is at index 9 (x=18, y=19)
+      final double mx = relativeCoords[18];
+      final double my = relativeCoords[19];
+      
+      // Calculate angle of wrist-to-middle_mcp
+      final double angle = math.atan2(my, mx);
+      final double delta = -math.pi / 2 - angle;
+      
+      final double cosD = math.cos(delta);
+      final double sinD = math.sin(delta);
+      
+      List<double> rotatedCoords = [];
+      double maxAbsValue = 0.0;
+      
+      for (int i = 0; i < relativeCoords.length; i += 2) {
+        double x = relativeCoords[i];
+        double y = relativeCoords[i + 1];
+        double xRot = x * cosD - y * sinD;
+        double yRot = x * sinD + y * cosD;
+        
+        rotatedCoords.add(xRot);
+        rotatedCoords.add(yRot);
+        
+        if (xRot.abs() > maxAbsValue) maxAbsValue = xRot.abs();
+        if (yRot.abs() > maxAbsValue) maxAbsValue = yRot.abs();
+      }
+      
+      // Step 3: Normalize by max absolute value (avoid division by zero)
+      List<double> normalizedCoords = [];
+      if (maxAbsValue > 0) {
+        for (int i = 0; i < rotatedCoords.length; i++) {
+          normalizedCoords.add(rotatedCoords[i] / maxAbsValue);
+        }
+      } else {
+        normalizedCoords = List.from(rotatedCoords);
+      }
+
+      // Step 4: Apply the StandardScaler from training
+      final normalized = List<double>.generate(
+        normalizedCoords.length,
+        (i) => (normalizedCoords[i] - _scalerMean[i]) / _scalerScale[i],
+      );
+
+      var input  = normalized.reshape([1, 42]);
+      var output = List.filled(_labels.length, 0.0).reshape([1, _labels.length]);
+      _classifierInterp!.run(input, output);
+
+      final probs = (output[0] as List).cast<double>();
+      int bestIdx = 0;
+      double bestProb = probs[0];
+      for (int i = 1; i < probs.length; i++) {
+        if (probs[i] > bestProb) {
+          bestProb = probs[i];
+          bestIdx = i;
         }
       }
 
-      // 6. Return label if confidence is high enough
-      if (maxProb > 0.5) {
-        return _labels![highestProbIndex];
-      } else {
-        return "Unrecognized";
-      }
-
+      return {
+        'gesture': bestProb > 0.65 ? _labels[bestIdx] : '',
+        'confidence': bestProb,
+      };
     } catch (e) {
-      print("Error during inference: $e");
-      return "Error";
+      print('Classifier error: $e');
+      return {'gesture': '', 'confidence': 0.0};
     }
-  }
-
-  /// Converts a [CameraImage] to an [img.Image]
-  img.Image? _convertCameraImage(CameraImage image) {
-    if (Platform.isAndroid && image.format.group == ImageFormatGroup.yuv420) {
-      return _convertYUV420ToImage(image);
-    } else if (Platform.isIOS && image.format.group == ImageFormatGroup.bgra8888) {
-      return _convertBGRA8888ToImage(image);
-    }
-    return null; // Unsupported format
-  }
-
-  img.Image _convertYUV420ToImage(CameraImage image) {
-    final width = image.width;
-    final height = image.height;
-    
-    final imgImage = img.Image(width: width, height: height);
-
-    final yBuffer = image.planes[0].bytes;
-    final uBuffer = image.planes[1].bytes;
-    final vBuffer = image.planes[2].bytes;
-
-    final int yRowStride = image.planes[0].bytesPerRow;
-    final int uvRowStride = image.planes[1].bytesPerRow;
-    final int uvPixelStride = image.planes[1].bytesPerPixel ?? 1;
-
-    for (int y = 0; y < height; y++) {
-      int uvRow = y >> 1;
-      for (int x = 0; x < width; x++) {
-        int uvCol = x >> 1;
-        
-        int yIndex = (y * yRowStride) + x;
-        int uvIndex = (uvRow * uvRowStride) + (uvCol * uvPixelStride);
-
-        int yValue = yBuffer[yIndex];
-        int uValue = uBuffer[uvIndex];
-        int vValue = vBuffer[uvIndex];
-
-        // Convert YUV to RGB
-        int r = (yValue + 1.402 * (vValue - 128)).round().clamp(0, 255);
-        int g = (yValue - 0.344136 * (uValue - 128) - 0.714136 * (vValue - 128)).round().clamp(0, 255);
-        int b = (yValue + 1.772 * (uValue - 128)).round().clamp(0, 255);
-
-        imgImage.setPixelRgb(x, y, r, g, b);
-      }
-    }
-    return imgImage;
-  }
-
-  img.Image _convertBGRA8888ToImage(CameraImage image) {
-    return img.Image.fromBytes(
-      width: image.width,
-      height: image.height,
-      bytes: image.planes[0].bytes.buffer,
-      order: img.ChannelOrder.bgra,
-    );
-  }
-
-  /// Converts [img.Image] to a 3D float32 array for MobileNetV2
-  /// simulating grayscale to match the training dataset conditions.
-  List<List<List<List<double>>>> _imageToByteListFloat32(img.Image image, int inputSize, double mean, double std) {
-    var convertedBytes = List.generate(
-      1,
-      (i) => List.generate(
-        inputSize,
-        (y) => List.generate(
-          inputSize,
-          (x) {
-            final pixel = image.getPixel(x, y);
-            // Convert to grayscale using standard luminance formula
-            final num luminance = (0.299 * pixel.r) + (0.587 * pixel.g) + (0.114 * pixel.b);
-            final normalized = (luminance - mean) / std;
-            
-            return [
-              normalized,
-              normalized,
-              normalized,
-            ];
-          },
-        ),
-      ),
-    );
-    return convertedBytes;
   }
 }
