@@ -24,10 +24,21 @@ Thumbs.db
 .vscode/
 .idea/
 
-# ML Datasets (large files usually not committed)
+# ML Datasets and Models (large files not committed)
 ML\ Model/hagrid_dataset/
 ML\ Model/leapgestrecog/
 ML\ Model/leapgestrecog_retry/
 ML\ Model/organized_dataset/
+ML\ Model/freihand_data/
+ML\ Model/*.zip
+ML\ Model/*.csv
+ML\ Model/*.task
+ML\ Model/*.keras
+ML\ Model/*.ipynb
+ML\ Model/patch_*.py
+ML\ Model/fix_*.py
+ML\ Model/*.tflite
+!ML\ Model/gesture_labels.json
+!ML\ Model/scaler_params.json
 
 # Note: gesture_detector directory has its own .gitignore for Flutter specific files
