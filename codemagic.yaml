@@ -35,11 +35,12 @@ workflows:
           flutter packages pub get
       - name: Build unsigned iOS IPA
         script: |
+          set -e
           cd gesture_detector
           flutter build ios --release --no-codesign
           cd build/ios/iphoneos
           mkdir -p Payload
-          cp -r Runner.app Payload/
+          cp -R Runner.app Payload/
           zip -r app.ipa Payload
     artifacts:
       - gesture_detector/build/ios/iphoneos/app.ipa
