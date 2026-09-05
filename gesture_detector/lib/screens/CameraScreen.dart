@@ -51,30 +51,6 @@ class _CameraScreenState extends State<CameraScreen> {
         delegate: HandLandmarkerDelegate.cpu,
       );
 
-      // Listen to the landmark stream and run our MLP classifier on each frame
-      _landmarkerPlugin!.landmarkStream.listen((List<Hand> hands) {
-        if (!mounted) return;
-        setState(() => _hands = hands);
-
-        if (hands.isNotEmpty) {
-          final isBack = _controller?.description.lensDirection == CameraLensDirection.back;
-          // Flatten 21 landmarks into [x0,y0, x1,y1, ..., x20,y20]
-          final landmarks = hands.first.landmarks.expand((lm) {
-            double mappedX = isBack ? 1.0 - lm.y : lm.y; // For front camera, we might need lm.y depending on mirroring
-            double mappedY = isBack ? lm.x : 1.0 - lm.x;
-            return [mappedX, mappedY];
-          }).toList();
-          final result = _gestureService.classify(landmarks);
-          if (mounted) {
-            setState(() {
-              _gesture = result['gesture'] as String;
-              _confidence = result['confidence'] as double;
-            });
-          }
-        } else {
-          if (mounted) setState(() { _gesture = ''; _confidence = 0.0; });
-        }
-      });
 
       _updateStatus('Starting camera...');
       if (cameras == null || cameras!.isEmpty) {
@@ -100,11 +76,60 @@ class _CameraScreenState extends State<CameraScreen> {
       _updateStatus('Ready! Show your hand');
 
       // Feed camera frames to the MediaPipe hand landmarker plugin
+      bool isProcessing = false;
+      int lastProcessingTime = 0;
       await _controller!.startImageStream((image) {
-        _landmarkerPlugin?.processFrame(
-          image,
-          _controller!.description.sensorOrientation,
-        );
+        if (isProcessing) return;
+
+        // Throttle to roughly 15 FPS (approx 66ms between frames)
+        final int currentTime = DateTime.now().millisecondsSinceEpoch;
+        if (currentTime - lastProcessingTime < 66) return;
+
+        isProcessing = true;
+        lastProcessingTime = currentTime;
+
+        try {
+          if (_landmarkerPlugin != null) {
+            final hands = _landmarkerPlugin!.detect(
+              image,
+              _controller!.description.sensorOrientation,
+            );
+
+            if (!mounted) return;
+            setState(() => _hands = hands);
+
+            if (hands.isNotEmpty) {
+              // Extract raw MediaPipe landmarks and convert to physical isotropic pixels
+              // This prevents aspect ratio distortion when scaling on rectangular screens
+              final double imgWidth = image.width.toDouble();
+              final double imgHeight = image.height.toDouble();
+              
+              final landmarks = hands.first.landmarks.expand((lm) => [
+                lm.x * imgWidth,
+                lm.y * imgHeight
+              ]).toList();
+              
+              final result = _gestureService.classify(landmarks);
+              if (mounted) {
+                setState(() {
+                  _gesture = result['gesture'] as String;
+                  _confidence = result['confidence'] as double;
+                });
+              }
+            } else {
+              if (mounted) {
+                setState(() {
+                  _gesture = '';
+                  _confidence = 0.0;
+                });
+              }
+            }
+          }
+        } catch (e) {
+          debugPrint('Error processing frame: $e');
+        } finally {
+          isProcessing = false;
+        }
       });
     } catch (e) {
       _updateStatus('Error: $e');
@@ -223,14 +248,26 @@ class _CameraScreenState extends State<CameraScreen> {
                       ),
                     ),
                     Text(
-                      '${(_confidence * 100).toStringAsFixed(1)}% confidence',
-                      style: const TextStyle(color: Colors.white70, fontSize: 14),
+                      'Confidence Level: ${(_confidence * 100).toStringAsFixed(1)}%',
+                      style: const TextStyle(
+                        color: Colors.white, 
+                        fontSize: 20, 
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
                   ] else
                     Text(
                       _hands.isEmpty ? 'Show your hand to the camera' : 'Detecting...',
                       style: const TextStyle(color: Colors.white54, fontSize: 14),
                     ),
+                  const SizedBox(height: 12),
+                  const Divider(color: Colors.white24, height: 1),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Debug: ${_hands.length} Hand(s) | Lens: ${_controller?.description.lensDirection.name} | Res: ${_controller?.value.previewSize?.width.toInt()}x${_controller?.value.previewSize?.height.toInt()}',
+                    style: const TextStyle(color: Colors.yellowAccent, fontSize: 12),
+                    textAlign: TextAlign.center,
+                  ),
                 ],
               ),
             ),

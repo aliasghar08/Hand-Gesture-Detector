@@ -12,6 +12,14 @@ class GestureRecognitionService {
   List<double> _scalerMean = [];
   List<double> _scalerScale = [];
 
+  // Smoothing fields
+  List<double>? _emaLandmarks;
+  final double _emaAlpha = 0.4; // Smoothing factor (lower = smoother)
+  
+  // Rolling window for classification
+  final int _windowSize = 5;
+  final List<String> _history = [];
+
   bool get isReady => _classifierInterp != null && _labels.isNotEmpty;
 
   Future<void> initialize() async {
@@ -41,10 +49,21 @@ class GestureRecognitionService {
       return {'gesture': '', 'confidence': 0.0};
     }
 
+    // Apply EMA smoothing to landmarks
+    if (_emaLandmarks == null) {
+      _emaLandmarks = List.from(landmarks);
+    } else {
+      for (int i = 0; i < 42; i++) {
+        _emaLandmarks![i] = _emaAlpha * landmarks[i] + (1.0 - _emaAlpha) * _emaLandmarks![i];
+      }
+    }
+    final smoothedLandmarks = _emaLandmarks!;
+
     try {
       // Step 1: Convert to wrist-relative coordinates
-      final double wristX = landmarks[0];
-      final double wristY = landmarks[1];
+      final double wristX = smoothedLandmarks[0];
+      final double wristY = smoothedLandmarks[1];
+
       
       List<double> relativeCoords = [];
       
@@ -111,8 +130,31 @@ class GestureRecognitionService {
         }
       }
 
+      String rawGesture = bestProb > 0.40 ? _labels[bestIdx] : '';
+
+      // Update history buffer for temporal smoothing
+      _history.add(rawGesture);
+      if (_history.length > _windowSize) {
+        _history.removeAt(0);
+      }
+
+      // Find the most frequent gesture (Mode) in the history window
+      String finalGesture = '';
+      if (_history.isNotEmpty) {
+        final counts = <String, int>{};
+        for (var g in _history) {
+          counts[g] = (counts[g] ?? 0) + 1;
+        }
+        var mode = counts.entries.reduce((a, b) => a.value > b.value ? a : b);
+        
+        // Require majority agreement in the window
+        if (mode.value >= (_windowSize / 2.0).ceil()) {
+          finalGesture = mode.key;
+        }
+      }
+
       return {
-        'gesture': bestProb > 0.65 ? _labels[bestIdx] : '',
+        'gesture': finalGesture,
         'confidence': bestProb,
       };
     } catch (e) {

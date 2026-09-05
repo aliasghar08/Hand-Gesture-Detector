@@ -20,7 +20,7 @@ class HomePage extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Text(
-              "Hand Gesture App",
+              "WaveSense",
               style: TextStyle(
                 fontSize: 28,
                 color: Colors.white,

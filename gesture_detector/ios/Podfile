@@ -1,0 +1,94 @@
+# Uncomment this line to define a global platform for your project
+platform :ios, '15.5'
+
+# CocoaPods analytics sends network stats synchronously affecting flutter build latency.
+ENV['COCOAPODS_DISABLE_STATS'] = 'true'
+
+project 'Runner', {
+  'Debug' => :debug,
+  'Profile' => :release,
+  'Release' => :release,
+}
+
+def flutter_root
+  generated_xcode_build_settings_path = File.expand_path(File.join('..', 'Flutter', 'Generated.xcconfig'), __dir__)
+  unless File.exist?(generated_xcode_build_settings_path)
+    raise "#{generated_xcode_build_settings_path} must exist. If you're running pod install manually, make sure flutter pub get is executed first"
+  end
+
+  File.foreach(generated_xcode_build_settings_path) do |line|
+    matches = line.match(/FLUTTER_ROOT\=(.*)/)
+    return matches[1].strip if matches
+  end
+  raise "FLUTTER_ROOT not found in #{generated_xcode_build_settings_path}. Try deleting Generated.xcconfig, then run flutter pub get"
+end
+
+# --- EMERGENCY CACHE BUSTER FOR CODEMAGIC ---
+begin
+  require 'fileutils'
+  require 'json'
+  
+  # 1. Forcefully delete the cached symlinks directory
+  symlinks_dir = File.join(__dir__, '.symlinks')
+  if Dir.exist?(symlinks_dir)
+    puts "[CACHE BUSTER] Deleting stale .symlinks directory..."
+    FileUtils.rm_rf(symlinks_dir)
+  end
+
+  legacy_plugins_file = File.join(File.dirname(__dir__), '.flutter-plugins')
+  if File.exist?(legacy_plugins_file)
+    puts "[CACHE BUSTER] Deleting stale .flutter-plugins file..."
+    FileUtils.rm_f(legacy_plugins_file)
+  end
+
+  # 2. Forcefully remove any google_mlkit plugins from the flutter dependencies file
+  #    so CocoaPods won't even try to resolve them.
+  deps_file = File.join(File.dirname(__dir__), '.dart_tool', 'flutter_build', '.flutter-plugins-dependencies')
+  deps_file = File.join(File.dirname(__dir__), '.flutter-plugins-dependencies') unless File.exist?(deps_file)
+  
+  if File.exist?(deps_file)
+    puts "[CACHE BUSTER] Analyzing #{deps_file}..."
+    content = File.read(deps_file)
+    if content.include?('google_mlkit')
+      deps = JSON.parse(content)
+      if deps['plugins'] && deps['plugins']['ios']
+        original_count = deps['plugins']['ios'].length
+        deps['plugins']['ios'].reject! { |p| p['name'].include?('google_mlkit') }
+        new_count = deps['plugins']['ios'].length
+        if original_count != new_count
+          puts "[CACHE BUSTER] Removed #{original_count - new_count} stale ML Kit plugins from dependencies."
+          File.write(deps_file, JSON.pretty_generate(deps))
+        end
+      end
+    end
+  end
+rescue => e
+  puts "[CACHE BUSTER] Failed to run: #{e}"
+end
+# --------------------------------------------
+
+require File.expand_path(File.join('packages', 'flutter_tools', 'bin', 'podhelper'), flutter_root)
+
+flutter_ios_podfile_setup
+
+target 'Runner' do
+  use_frameworks!
+  use_modular_headers!
+
+  flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
+end
+
+post_install do |installer|
+  installer.pods_project.targets.each do |target|
+    flutter_additional_ios_build_settings(target)
+    target.build_configurations.each do |config|
+      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.5'
+      config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] ||= [
+        '$(inherited)',
+        'PERMISSION_CAMERA=1',
+        'PERMISSION_MICROPHONE=1',
+        'PERMISSION_PHOTOS=1'
+      ]
+    end
+  end
+end

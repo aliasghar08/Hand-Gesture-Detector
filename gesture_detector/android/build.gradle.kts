@@ -24,7 +24,7 @@ subprojects {
 
 allprojects {
     tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
-        if (project.name.startsWith("camera") || project.name == "app") {
+        if (project.name.startsWith("camera") || project.name == "app" || project.name == "hand_landmarker") {
             compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) }
         } else {
             compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11) }

@@ -16,7 +16,7 @@ DATA_URL  = "https://raw.githubusercontent.com/kinivi/hand-gesture-recognition-m
 LABEL_URL = "https://raw.githubusercontent.com/kinivi/hand-gesture-recognition-mediapipe/main/model/keypoint_classifier/keypoint_classifier_label.csv"
 CSV_FILE   = "hand_gestures.csv"
 LABEL_FILE = "hand_gesture_labels.csv"
-OUTPUT_DIR = r"c:\Flutter Projects\Hand Gesture Detector using Custom Model\gesture_detector\assets"
+OUTPUT_DIR = r"c:\Hand Gesture Detector using Custom Model\gesture_detector\assets"
 
 if not os.path.exists(CSV_FILE):
     print("Downloading dataset from GitHub...")
@@ -41,6 +41,68 @@ print(f"Class distribution:\n{df[0].value_counts().sort_index()}")
 
 X = df.iloc[:, 1:].values.astype(np.float32)   # 42 landmark coordinates
 y = df.iloc[:, 0].values.astype(np.int32)       # class index
+
+import math
+import random
+
+# Apply analytical rotation invariance and Data Augmentation
+new_X = []
+new_y = []
+
+# Data Augmentation settings
+NUM_AUGMENTATIONS = 9
+
+for idx, row in enumerate(X):
+    mx, my = row[18], row[19]
+    angle = math.atan2(my, mx)
+    delta = -math.pi/2 - angle
+    
+    cosD = math.cos(delta)
+    sinD = math.sin(delta)
+    
+    rotated = []
+    max_val = 0.0
+    for i in range(0, 42, 2):
+        x_val = row[i]
+        y_val = row[i+1]
+        rx = x_val * cosD - y_val * sinD
+        ry = x_val * sinD + y_val * cosD
+        rotated.extend([rx, ry])
+        max_val = max(max_val, abs(rx), abs(ry))
+        
+    if max_val > 0:
+        rotated = [v / max_val for v in rotated]
+    else:
+        rotated = row.tolist()
+        
+    # Append the original (rotated) data
+    new_X.append(rotated)
+    new_y.append(y[idx])
+    
+    # Generate Synthetic Augmented Data
+    for _ in range(NUM_AUGMENTATIONS):
+        aug_row = []
+        # Random scale factor between 0.8 and 1.2
+        scale = random.uniform(0.8, 1.2)
+        aug_max_val = 0.0
+        
+        for i in range(42):
+            # Apply scale and add random Gaussian noise (std=0.02)
+            noise = random.gauss(0, 0.02)
+            val = (rotated[i] * scale) + noise
+            aug_row.append(val)
+            if abs(val) > aug_max_val:
+                aug_max_val = abs(val)
+                
+        # Re-normalize augmented row
+        if aug_max_val > 0:
+            aug_row = [v / aug_max_val for v in aug_row]
+            
+        new_X.append(aug_row)
+        new_y.append(y[idx])
+
+X = np.array(new_X, dtype=np.float32)
+y = np.array(new_y, dtype=np.int32)
 
 num_classes  = len(unique_labels)
 num_features = X.shape[1]

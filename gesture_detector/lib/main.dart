@@ -25,7 +25,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Hand Gesture App',
+      title: 'WaveSense',
       theme: ThemeData(
         primarySwatch: Colors.blue,
       ),
