@@ -39,23 +39,24 @@ workflows:
           cd gesture_detector
           rm -f ios/Podfile
           flutter create . --platforms=ios
-          cat << 'EOF' >> ios/Podfile
-
-          post_install do |installer|
-            installer.pods_project.targets.each do |target|
-              flutter_additional_ios_build_settings(target)
-              target.build_configurations.each do |config|
-                config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.5'
-                config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] ||= [
-                  '$(inherited)',
-                  'PERMISSION_CAMERA=1',
-                  'PERMISSION_MICROPHONE=1',
-                  'PERMISSION_PHOTOS=1'
-                ]
-              end
-            end
-          end
-          EOF
+          
+          ruby -e '
+            path = "ios/Podfile"
+            content = File.read(path)
+            injection = <<-RUBY
+                  target.build_configurations.each do |config|
+                    config.build_settings["IPHONEOS_DEPLOYMENT_TARGET"] = "15.5"
+                    config.build_settings["GCC_PREPROCESSOR_DEFINITIONS"] ||= [
+                      "$(inherited)",
+                      "PERMISSION_CAMERA=1",
+                      "PERMISSION_MICROPHONE=1",
+                      "PERMISSION_PHOTOS=1"
+                    ]
+                  end
+            RUBY
+            content = content.sub(/flutter_additional_ios_build_settings\(target\)/, "flutter_additional_ios_build_settings(target)\n" + injection)
+            File.write(path, content)
+          '
       - name: Build unsigned iOS IPA
         script: |
           set -e
