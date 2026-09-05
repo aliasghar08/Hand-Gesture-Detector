@@ -1,6 +1,8 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math' as math;
 import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:tflite_flutter/tflite_flutter.dart';
 
 /// Handles only Stage 2: 21 MediaPipe landmarks → gesture label.
@@ -24,7 +26,20 @@ class GestureRecognitionService {
 
   Future<void> initialize() async {
     // Load MLP gesture classifier (tiny model, fast on main thread)
-    _classifierInterp = await Interpreter.fromAsset('assets/gesture_classifier.tflite');
+    // On iOS, we bypass the native asset loader which frequently crashes on memory mapping,
+    // and instead write the bytes to a temp file and load it physically.
+    if (Platform.isIOS) {
+      final byteData = await rootBundle.load('assets/gesture_classifier.tflite');
+      final dir = await getTemporaryDirectory();
+      final file = File('${dir.path}/gesture_classifier.tflite');
+      await file.writeAsBytes(
+        byteData.buffer.asUint8List(byteData.offsetInBytes, byteData.lengthInBytes),
+        flush: true,
+      );
+      _classifierInterp = await Interpreter.fromFile(file);
+    } else {
+      _classifierInterp = await Interpreter.fromAsset('assets/gesture_classifier.tflite');
+    }
 
     final labelsJson = await rootBundle.loadString('assets/gesture_labels.json');
     _labels = List<String>.from(jsonDecode(labelsJson));
