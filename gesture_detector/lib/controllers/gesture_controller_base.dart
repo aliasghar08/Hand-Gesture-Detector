@@ -41,10 +41,10 @@ abstract class BaseGestureControllerManager extends ChangeNotifier {
       final hand = handsReceived.first;
       
       final landmarks = hand.landmarks.expand((lm) {
-        // Pass the raw pixel coordinates directly.
+        // Pass the raw pixel coordinates directly by multiplying normalized coords by width/height.
         // The ML model was trained on true pixel coordinates (translated to wrist and max-abs scaled),
         // so we don't need to normalize to [0, 1] or squish the aspect ratio!
-        return [lm.x, lm.y];
+        return [lm.x * width, lm.y * height];
       }).toList();
       
       final result = gestureService.classify(landmarks);
