@@ -43,7 +43,12 @@ dependencies {
     implementation("com.google.mlkit:text-recognition-devanagari:16.0.0")
     implementation("com.google.mlkit:text-recognition-japanese:16.0.0")
     implementation("com.google.mlkit:text-recognition-korean:16.0.0")
+}
 
-   
-
+subprojects {
+    afterEvaluate {
+        project.tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile::class.java).configureEach {
+            kotlinOptions.jvmTarget = "17"
+        }
+    }
 }
