@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:hand_gesture_app/screens/home.dart';
+import 'package:hand_gesture_app/utils/debug_logger.dart';
 
 // Declare cameras at top level
 List<CameraDescription>? cameras;
@@ -10,10 +11,11 @@ void main() async {
   
   // Initialize cameras
   try {
+    WidgetsFlutterBinding.ensureInitialized();
     cameras = await availableCameras();
-    print('Number of cameras found: ${cameras?.length}');
+    DebugLogger.log('Number of cameras found: ${cameras?.length}');
   } catch (e) {
-    print('Error initializing cameras: $e');
+    DebugLogger.logError('Initializing cameras', e);
   }
   
   runApp(const MyApp());

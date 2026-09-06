@@ -93,6 +93,8 @@ model.fit(
 )
 print("Training complete!")
 
+model.save('best_model.keras')
+
 test_loss, test_accuracy = model.evaluate(X_test, y_test, verbose=0)
 print(f"\nTest Accuracy: {test_accuracy * 100:.2f}%")
 

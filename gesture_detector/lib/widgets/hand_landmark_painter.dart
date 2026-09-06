@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
-import 'package:hand_landmarker/hand_landmarker.dart';
+import 'package:hand_detection/hand_detection.dart';
 
 /// Draws hand landmarks and skeleton bones on top of the camera preview.
 class HandLandmarkPainter extends CustomPainter {
@@ -34,14 +34,23 @@ class HandLandmarkPainter extends CustomPainter {
       final lms = hand.landmarks;
       if (lms.length != 21) continue;
 
-      // Map normalized [0,1] coordinates to canvas pixels based on sensor rotation
-      List<Offset> pts = lms.map((lm) {
-        bool isBack = lensDirection == CameraLensDirection.back;
-        double mappedX = isBack ? 1.0 - lm.y : lm.y;
-        double mappedY = isBack ? lm.x : 1.0 - lm.x;
+      // hand_detection returns absolute pixel coordinates in image space.
+      // We must normalize them using imageWidth/imageHeight to [0, 1] relative to the image
+      // and then project them onto the canvas size.
+      final double imgW = hand.imageWidth > 0 ? hand.imageWidth.toDouble() : previewSize.width;
+      final double imgH = hand.imageHeight > 0 ? hand.imageHeight.toDouble() : previewSize.height;
 
-        double x = mappedX * size.width;
-        double y = mappedY * size.height;
+      List<Offset> pts = lms.map((lm) {
+        double normX = lm.x / imgW;
+        double normY = lm.y / imgH;
+
+        bool isFront = lensDirection == CameraLensDirection.front;
+        // On front cameras, the camera preview is often mirrored by the framework
+        double finalX = isFront ? 1.0 - normX : normX;
+        double finalY = normY;
+
+        double x = finalX * size.width;
+        double y = finalY * size.height;
         return Offset(x, y);
       }).toList();
 

@@ -1,7 +1,9 @@
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:hand_gesture_app/core/app_strings.dart';
+import 'package:hand_gesture_app/helpers/web_camera_helper.dart';
 
 class CameraControllerManager extends ChangeNotifier {
   CameraController? _controller;
@@ -13,15 +15,18 @@ class CameraControllerManager extends ChangeNotifier {
   bool get isInitialized => _isInitialized;
   bool get isFlashOn => _isFlashOn;
   String get status => _status;
+  DeviceOrientation get deviceOrientation => _controller?.value.deviceOrientation ?? DeviceOrientation.portraitUp;
 
-  Future<void> initializeCamera(Function(CameraImage, int) onImageStream) async {
+  Future<void> initializeCamera(Function(dynamic, int, DeviceOrientation) onImageStream) async {
     try {
-      _updateStatus(AppStrings.requestingPermission);
-      final status = await Permission.camera.request();
+      if (!kIsWeb) {
+        _updateStatus(AppStrings.requestingPermission);
+        final status = await Permission.camera.request();
 
-      if (!status.isGranted) {
-        _updateStatus(AppStrings.permissionDenied);
-        return;
+        if (!status.isGranted) {
+          _updateStatus(AppStrings.permissionDenied);
+          return;
+        }
       }
 
       _updateStatus(AppStrings.loadingCamera);
@@ -30,11 +35,33 @@ class CameraControllerManager extends ChangeNotifier {
         _updateStatus(AppStrings.noCameras);
         return;
       }
+      
+      for (var c in cameras) {
+        debugPrint("Found camera: ${c.name}, lens: ${c.lensDirection}");
+      }
 
-      final camera = cameras.firstWhere(
-        (c) => c.lensDirection == CameraLensDirection.back,
-        orElse: () => cameras.first,
-      );
+      CameraDescription? selectedCamera;
+      
+      try {
+        selectedCamera = cameras.firstWhere((c) => c.lensDirection == CameraLensDirection.front);
+      } catch (e) {
+        // Front not found
+      }
+      
+      if (selectedCamera == null && cameras.isNotEmpty) {
+        // Fallback: try to find a camera that isn't an IR/Depth camera
+        try {
+          selectedCamera = cameras.firstWhere(
+            (c) => !c.name.toLowerCase().contains("ir ") && 
+                   !c.name.toLowerCase().contains("depth") &&
+                   !c.name.toLowerCase().contains("infrared")
+          );
+        } catch (e) {
+          selectedCamera = cameras.last;
+        }
+      }
+      
+      final camera = selectedCamera ?? cameras.first;
 
       _controller = CameraController(
         camera,
@@ -48,12 +75,23 @@ class CameraControllerManager extends ChangeNotifier {
       notifyListeners();
 
       final sensorOrientation = _controller!.description.sensorOrientation;
-      await _controller!.startImageStream((image) {
-        onImageStream(image, sensorOrientation);
-      });
+      
+      if (kIsWeb) {
+        importHelperAndStart(onImageStream, sensorOrientation, deviceOrientation);
+      } else {
+        await _controller!.startImageStream((image) {
+          onImageStream(image, sensorOrientation, deviceOrientation);
+        });
+      }
     } catch (e) {
       _updateStatus("Error: $e");
     }
+  }
+
+  void importHelperAndStart(Function onImageStream, int sensorOrientation, DeviceOrientation deviceOrientation) {
+    WebCameraHelper.startWebCameraStream((image) {
+      onImageStream(image, sensorOrientation, deviceOrientation);
+    });
   }
 
   void _updateStatus(String msg) {

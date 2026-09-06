@@ -4,12 +4,12 @@
 
 list(APPEND FLUTTER_PLUGIN_LIST
   flutter_tts
+  hand_detection
   permission_handler_windows
 )
 
 list(APPEND FLUTTER_FFI_PLUGIN_LIST
-  jni
-  tflite_flutter
+  flutter_litert
 )
 
 set(PLUGIN_BUNDLED_LIBRARIES)

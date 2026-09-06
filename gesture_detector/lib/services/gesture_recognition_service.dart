@@ -2,14 +2,13 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 import 'package:flutter/services.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:tflite_flutter/tflite_flutter.dart';
+import 'package:hand_gesture_app/services/dart_mlp_classifier.dart';
 
-/// Handles only Stage 2: 21 MediaPipe landmarks → gesture label.
+/// Handles only Stage 2: 21 MediaPipe landmarks -> gesture label.
 /// Stage 1 (hand detection + landmark extraction) is done by the
-/// hand_landmarker plugin in CameraScreen.
+/// hand_detection plugin in CameraScreen.
 class GestureRecognitionService {
-  Interpreter? _classifierInterp;
+  DartMlpClassifier _classifier = DartMlpClassifier();
   List<String> _labels = [];
   List<double> _scalerMean = [];
   List<double> _scalerScale = [];
@@ -22,24 +21,12 @@ class GestureRecognitionService {
   final int _windowSize = 5;
   final List<String> _history = [];
 
-  bool get isReady => _classifierInterp != null && _labels.isNotEmpty;
+  bool get isReady => _classifier.isReady && _labels.isNotEmpty;
 
   Future<void> initialize() async {
-    // Load MLP gesture classifier (tiny model, fast on main thread)
-    // On iOS, we bypass the native asset loader which frequently crashes on memory mapping,
-    // and instead write the bytes to a temp file and load it physically.
-    if (Platform.isIOS) {
-      final byteData = await rootBundle.load('assets/gesture_classifier.tflite');
-      final dir = await getTemporaryDirectory();
-      final file = File('${dir.path}/gesture_classifier.tflite');
-      await file.writeAsBytes(
-        byteData.buffer.asUint8List(byteData.offsetInBytes, byteData.lengthInBytes),
-        flush: true,
-      );
-      _classifierInterp = await Interpreter.fromFile(file);
-    } else {
-      _classifierInterp = await Interpreter.fromAsset('assets/gesture_classifier.tflite');
-    }
+    // Load MLP gesture classifier weights
+    final weightsJson = await rootBundle.loadString('assets/gesture_weights.json');
+    await _classifier.loadWeights(weightsJson);
 
     final labelsJson = await rootBundle.loadString('assets/gesture_labels.json');
     _labels = List<String>.from(jsonDecode(labelsJson));
@@ -48,12 +35,10 @@ class GestureRecognitionService {
     final scalerData = jsonDecode(scalerJson);
     _scalerMean  = List<double>.from(scalerData['mean']);
     _scalerScale = List<double>.from(scalerData['scale']);
-
-    print('Gesture classifier ready. Labels: $_labels');
   }
 
   void dispose() {
-    _classifierInterp?.close();
+    // Nothing to dispose for DartMlpClassifier
   }
 
   /// Classify a gesture from 21 landmarks.
@@ -82,9 +67,9 @@ class GestureRecognitionService {
       
       List<double> relativeCoords = [];
       
-      for (int i = 0; i < landmarks.length; i += 2) {
-        relativeCoords.add(landmarks[i] - wristX);
-        relativeCoords.add(landmarks[i + 1] - wristY);
+      for (int i = 0; i < smoothedLandmarks.length; i += 2) {
+        relativeCoords.add(smoothedLandmarks[i] - wristX);
+        relativeCoords.add(smoothedLandmarks[i + 1] - wristY);
       }
       
       // Step 2: Rotation invariance
@@ -124,6 +109,10 @@ class GestureRecognitionService {
       } else {
         normalizedCoords = List.from(rotatedCoords);
       }
+      
+      // Step 3.5: Append the angle features (cos and sin)
+      normalizedCoords.add(cosD);
+      normalizedCoords.add(sinD);
 
       // Step 4: Apply the StandardScaler from training
       final normalized = List<double>.generate(
@@ -131,11 +120,8 @@ class GestureRecognitionService {
         (i) => (normalizedCoords[i] - _scalerMean[i]) / _scalerScale[i],
       );
 
-      var input  = normalized.reshape([1, 42]);
-      var output = List.filled(_labels.length, 0.0).reshape([1, _labels.length]);
-      _classifierInterp!.run(input, output);
-
-      final probs = (output[0] as List).cast<double>();
+      final probs = _classifier.predict(normalized);
+      
       int bestIdx = 0;
       double bestProb = probs[0];
       for (int i = 1; i < probs.length; i++) {
@@ -173,7 +159,6 @@ class GestureRecognitionService {
         'confidence': bestProb,
       };
     } catch (e) {
-      print('Classifier error: $e');
       return {'gesture': '', 'confidence': 0.0};
     }
   }

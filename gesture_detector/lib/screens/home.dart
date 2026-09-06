@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:hand_gesture_app/screens/CameraScreen.dart';
+import 'package:hand_gesture_app/screens/camera_screen.dart';
 
 class HomePage extends StatelessWidget {
   const HomePage({super.key});

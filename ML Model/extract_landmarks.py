@@ -35,9 +35,11 @@ for root, dirs, files in os.walk(DATASET_ROOT):
     for file in files:
         if file.lower().endswith(('.png', '.jpg', '.jpeg')):
             label = os.path.basename(root)
+            if label not in ['01_palm', '02_l', '03_fist', '05_thumb', '06_index', '07_ok', '09_c', '10_down']:
+                continue
             if label not in class_counts:
                 class_counts[label] = 0
-            if class_counts[label] < 300:
+            if class_counts[label] < 1500:
                 image_paths.append(os.path.join(root, file))
                 class_counts[label] += 1
 
@@ -88,6 +90,8 @@ def preprocess_landmarks(landmarks):
     if max_abs_value > 0:
         rotated = [c / max_abs_value for c in rotated]
         
+    rotated.extend([math.cos(angle), math.sin(angle)])
+        
     return rotated
 
 data = []
@@ -126,22 +130,31 @@ for i, img_path in enumerate(image_paths):
         hand_landmarks = detection_result.hand_landmarks[0]
         
         raw_coords = []
+        img_h, img_w, _ = img.shape
         for lm in hand_landmarks:
-            raw_coords.extend([lm.x, lm.y])
+            raw_coords.extend([lm.x * img_w, lm.y * img_h])
             
         processed_coords = preprocess_landmarks(raw_coords)
-        
         row = [label] + processed_coords
         data.append(row)
+        
+        # Horizontal flip augmentation to support left hands & mirrored webcams!
+        flipped_coords = []
+        for i in range(0, len(raw_coords), 2):
+            flipped_coords.extend([img_w - raw_coords[i], raw_coords[i+1]])
+        processed_flipped = preprocess_landmarks(flipped_coords)
+        row_flipped = [label] + processed_flipped
+        data.append(row_flipped)
+        
         success_count += 1
 
 print(f"\nSuccessfully extracted landmarks from {success_count}/{len(image_paths)} images.")
 
-cols = ['label'] + [f'feat_{i}' for i in range(42)]
+cols = ['label'] + [f'feat_{i}' for i in range(44)]
 df = pd.DataFrame(data, columns=cols)
 
 # Make label the last column
-cols = [f'feat_{i}' for i in range(42)] + ['label']
+cols = [f'feat_{i}' for i in range(44)] + ['label']
 df = df[cols]
 
 df.to_csv(OUTPUT_CSV, index=False)
