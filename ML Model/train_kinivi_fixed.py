@@ -184,6 +184,10 @@ for idx, label in enumerate(unique_labels):
 
 # Export to TFLite
 print("\nConverting to TFLite...")
+
+model.save('best_model.keras')
+print("Saved best_model.keras")
+
 converter = tf.lite.TFLiteConverter.from_keras_model(model)
 converter.optimizations = [tf.lite.Optimize.DEFAULT]
 tflite_model = converter.convert()
